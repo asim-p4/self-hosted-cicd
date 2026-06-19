@@ -1,0 +1,124 @@
+{
+  "projects": [
+    {
+      "name": "storage-app-backend",
+      "branch": "main",
+      "type": "ssh-deploy",
+      "config": {
+        "sshHost": "smart-storage-app",
+        "remotePath": "/home/ubuntu/storage-app-backend",
+        "commands": [
+          "TIMESTAMP=$(date +%Y%m%d-%H%M%S)",
+          "RELEASE_DIR=/home/ubuntu/storage-app-backend/releases/$TIMESTAMP",
+          "CURRENT_DIR=/home/ubuntu/storage-app-backend/current",
+          "PREVIOUS_RELEASE=$(readlink -f /home/ubuntu/storage-app-backend/current 2>/dev/null || echo '')",
+          "mkdir -p $RELEASE_DIR",
+          "git clone --branch main --depth 1 https://github.com/asim-p4/storage-app-backend.git $RELEASE_DIR",
+          "cd $RELEASE_DIR",
+          "ln -sfn /home/ubuntu/storage-app-backend/shared/.env .env",
+          "npm ci",
+          "ln -sfn $RELEASE_DIR $CURRENT_DIR",
+          "pm2 reload smart-storage",
+          "echo '⏳ Waiting for app to start...'",
+          "sleep 10",
+          "echo '🔍 Health check...'",
+          "HTTP_STATUS=$(curl -s -o /dev/null -w '%{http_code}' http://13.63.67.174:4000/health)",
+          "if [ $HTTP_STATUS -eq 200 ]; then",
+          "  echo '✅ Health check passed'",
+          "else",
+          "  echo '❌ Health check failed (HTTP $HTTP_STATUS)'",
+          "  echo '🔄 Rolling back...'",
+          "  if [ -n \"$PREVIOUS_RELEASE\" ] && [ -d \"$PREVIOUS_RELEASE\" ]; then",
+          "    ln -sfn $PREVIOUS_RELEASE $CURRENT_DIR",
+          "    pm2 reload smart-storage",
+          "    echo '✅ Rollback complete'",
+          "  else",
+          "    echo '⚠️ No previous release to rollback to'",
+          "  fi",
+          "  exit 1",
+          "fi",
+          "echo '🧹 Cleaning up old releases...'",
+          "find /home/ubuntu/storage-app-backend/releases/ -maxdepth 1 -mindepth 1 -type d | sort | head -n -3 | xargs rm -rf"
+        ]
+      }
+    },
+    {
+      "name": "storage-app-backend",
+      "branch": "testing",
+      "type": "ssh-deploy",
+      "config": {
+        "sshHost": "smart-storage-app",
+        "remotePath": "/home/ubuntu/test-storage-app-backend",
+        "commands": ["git pull origin testing", "pm2 reload test-smart-storage"]
+      }
+    },
+    {
+      "name": "storage-app-frontend",
+      "branch": "main",
+      "type": "s3-deploy",
+      "config": {
+        "localPath": "C:\\Users\\Muhammad Asim\\Desktop\\ProCoder\\node.js\\22-strip\\2-Stripe in StorageApp\\client",
+        "commands": [
+          "git checkout main",
+          "git pull",
+          "npm run test",
+          "npm run build",
+          "DIST_ID=$CF_DIST_ID_PROD",
+          "TIMESTAMP=$(date +%Y%m%d-%H%M%S)",
+          "NEW_PATH=//releases/$TIMESTAMP",
+          "aws s3 sync ./dist/ s3://smart-storage-client/releases/$TIMESTAMP/",
+          "cd /c/Users/Muhammad\\ Asim/",
+          "aws cloudfront get-distribution-config --id $DIST_ID > cf-prod-config.json",
+          "ETAG=$(cat cf-prod-config.json | jq -r '.ETag')",
+          "cat cf-prod-config.json | jq '.DistributionConfig' | jq --arg path \"$NEW_PATH\" '.Origins.Items[0].OriginPath = $path' | jq '.Origins.Items[0].OriginPath = (.Origins.Items[0].OriginPath | sub(\"//\"; \"/\"))' > cf-prod-updated.json",
+          "echo 'updated prod config'",
+          "PREVIOUS_PATH=/$(cat cf-prod-config.json | jq -r '.DistributionConfig.Origins.Items[0].OriginPath')",
+          "echo 'update-distribution'",
+          "aws cloudfront update-distribution --id $DIST_ID --distribution-config file://cf-prod-updated.json --if-match $ETAG",
+          "echo 'creating invalidation'",
+          "aws cloudfront create-invalidation --distribution-id $DIST_ID --paths '/*'",
+          "echo '⏳ Waiting for CloudFront to deploy...'",
+          "sleep 5",
+          "HTTP_STATUS=$(curl -s -o /dev/null -w '%{http_code}' https://d4o1w1cjnxn5o.cloudfront.net)",
+          "echo '🔍 Health check...'",
+          "if [ $HTTP_STATUS -eq 200 ]; then",
+          "  echo '✅ Health check passed'",
+          "else",
+          "  echo '🔍 Getting new ETag for rollback...'",
+          "  aws cloudfront get-distribution-config --id $DIST_ID > cf-prod-rollback-config.json",
+          "  ROLLBACK_ETAG=$(cat cf-prod-rollback-config.json | jq -r '.ETag')",
+          "  echo \"❌ Health check failed (HTTP $HTTP_STATUS)\"",
+          "  echo '🔄 Rolling back...'",
+          "  cat cf-prod-config.json | jq '.DistributionConfig' | jq --arg rollback \"$PREVIOUS_PATH\" '.Origins.Items[0].OriginPath = $rollback' | jq '.Origins.Items[0].OriginPath = (.Origins.Items[0].OriginPath | sub(\"//\"; \"/\"))' > cf-prod-rollback.json",
+          "  aws cloudfront update-distribution --id $DIST_ID --distribution-config file://cf-prod-rollback.json --if-match $ROLLBACK_ETAG",
+          "  aws cloudfront create-invalidation --distribution-id $DIST_ID --paths '/*'",
+          "  echo '✅ Rollback complete'",
+          "fi",
+          "echo '🧹 Cleaning up old releases (keeping last 3)...'",
+          "aws s3 ls s3://smart-storage-client/releases/ | awk '{print $2}' | sort | head -n -3 | while read folder; do",
+          "  echo \"Deleting: releases/$folder\"",
+          "  aws s3 rm s3://smart-storage-client/releases/$folder --recursive",
+          "done",
+          "echo '✅ Cleanup complete'"
+        ]
+      }
+    },
+    {
+      "name": "storage-app-frontend",
+      "branch": "testing",
+      "type": "s3-deploy",
+      "config": {
+        "localPath": "C:\\Users\\Muhammad Asim\\Desktop\\ProCoder\\node.js\\22-strip\\2-Stripe in StorageApp\\client",
+        "commands": [
+          "git checkout testing",
+          "git pull",
+          "npm run test",
+          "DIST_ID=$CF_DIST_ID_TEST",
+          "npm run build",
+          "aws s3 sync ./dist/ s3://test-smart-storage-client --delete",
+          "aws cloudfront create-invalidation --distribution-id $DIST_ID --paths '/*'"
+        ]
+      }
+    }
+  ]
+}
