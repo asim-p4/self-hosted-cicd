@@ -49,40 +49,40 @@ async function processQueue() {
     }
 
     // 2. SET PENDING STATUS (ONLY after branch check passes)
-    // await setCommitStatus(
-    //   repoFullName,
-    //   commitSha,
-    //   "pending",
-    //   `${repoName} deployment in progress...`,
-    // );
+    await setCommitStatus(
+      repoFullName,
+      commitSha,
+      "pending",
+      `${repoName} deployment in progress...`,
+    );
 
     // 3. RUN DEPLOYMENT
     const result = await deployer(repoName, project);
 
     if (result.success) {
       console.log(`✅ Completed: ${repoName}, Enviroment:${branch}`);
-      // await setCommitStatus(
-      //   repoFullName,
-      //   commitSha,
-      //   "success",
-      //   `${repoName} Deployment completed successfully!`,
-      // );
+      await setCommitStatus(
+        repoFullName,
+        commitSha,
+        "success",
+        `${repoName} Deployment completed successfully!`,
+      );
     }
   } catch (error) {
     const errMsg = typeof error === "string" ? error : error.message;
     console.error(`❌ Failed: ${repoName} - ${error.message}}`);
-    // await setCommitStatus(repoFullName, commitSha, "failure", error.message);
+    await setCommitStatus(repoFullName, commitSha, "failure", error.message);
 
-    // await sendFailureEmail({
-    //   repoName: repoFullName,
-    //   branch: branch,
-    //   commitSha: commitSha,
-    //   commitMessage: commitMessage || "No commit message",
-    //   author: author || "Unknown",
-    //   failedStep: error.failedStep || "unknown",
-    //   errorMessage: error.message,
-    //   timestamp: new Date().toISOString(),
-    // });
+    await sendFailureEmail({
+      repoName: repoFullName,
+      branch: branch,
+      commitSha: commitSha,
+      commitMessage: commitMessage || "No commit message",
+      author: author || "Unknown",
+      failedStep: error.failedStep || "unknown",
+      errorMessage: error.message,
+      timestamp: new Date().toISOString(),
+    });
   } finally {
     isProcessing = false;
     processQueue();
